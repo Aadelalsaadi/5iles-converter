@@ -68,11 +68,15 @@ app.post('/video-to-mp3', upload.single('file'), (req, res) => {
     return res.status(400).json({ error: 'Unsupported video format.' });
   }
 
-  const outputPath = inputPath + '.mp3';
-  const command = `ffmpeg -i "${inputPath}" -vn -acodec libmp3lame -q:a 2 "${outputPath}" -y`;
+  // Rename with extension so FFmpeg can detect the format
+  const renamedInput = inputPath + ext;
+  fs.renameSync(inputPath, renamedInput);
+
+  const outputPath = renamedInput + '.mp3';
+  const command = `ffmpeg -i "${renamedInput}" -vn -acodec libmp3lame -q:a 2 "${outputPath}" -y`;
 
   exec(command, { timeout: 120000 }, (error, stdout, stderr) => {
-    try { fs.unlinkSync(inputPath); } catch (e) {}
+    try { fs.unlinkSync(renamedInput); } catch (e) {}
     if (error) return res.status(500).json({ error: 'Conversion failed', details: stderr });
     if (!fs.existsSync(outputPath)) return res.status(500).json({ error: 'Output MP3 not found' });
 
