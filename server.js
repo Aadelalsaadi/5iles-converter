@@ -68,7 +68,6 @@ app.post('/video-to-mp3', upload.single('file'), (req, res) => {
     return res.status(400).json({ error: 'Unsupported video format.' });
   }
 
-  // Rename with extension so FFmpeg can detect the format
   const renamedInput = inputPath + ext;
   fs.renameSync(inputPath, renamedInput);
 
@@ -82,6 +81,59 @@ app.post('/video-to-mp3', upload.single('file'), (req, res) => {
 
     const outputFileName = path.basename(originalName, ext) + '.mp3';
     res.setHeader('Content-Type', 'audio/mpeg');
+    res.setHeader('Content-Disposition', `attachment; filename="${outputFileName}"`);
+
+    const fileStream = fs.createReadStream(outputPath);
+    fileStream.pipe(res);
+    fileStream.on('close', () => { try { fs.unlinkSync(outputPath); } catch (e) {} });
+  });
+});
+
+// ── Audio Converter ───────────────────────────────────────────────────────────
+app.post('/convert-audio', upload.single('file'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+
+  const inputPath = req.file.path;
+  const originalName = req.file.originalname;
+  const inputExt = path.extname(originalName).toLowerCase();
+  const outputFormat = (req.query.format || 'mp3').toLowerCase();
+
+  const allowedInput = ['.mp3', '.wav', '.ogg', '.flac', '.aac', '.m4a', '.wma', '.opus'];
+  const allowedOutput = ['mp3', 'wav', 'ogg', 'flac', 'aac'];
+
+  if (!allowedInput.includes(inputExt)) {
+    fs.unlinkSync(inputPath);
+    return res.status(400).json({ error: 'Unsupported audio format.' });
+  }
+  if (!allowedOutput.includes(outputFormat)) {
+    fs.unlinkSync(inputPath);
+    return res.status(400).json({ error: 'Unsupported output format.' });
+  }
+
+  const renamedInput = inputPath + inputExt;
+  fs.renameSync(inputPath, renamedInput);
+
+  const outputPath = renamedInput + '.' + outputFormat;
+
+  // Build FFmpeg command based on output format
+  let audioOptions = '';
+  if (outputFormat === 'mp3') audioOptions = '-acodec libmp3lame -q:a 2';
+  else if (outputFormat === 'wav') audioOptions = '-acodec pcm_s16le';
+  else if (outputFormat === 'ogg') audioOptions = '-acodec libvorbis -q:a 4';
+  else if (outputFormat === 'flac') audioOptions = '-acodec flac';
+  else if (outputFormat === 'aac') audioOptions = '-acodec aac -b:a 192k';
+
+  const command = `ffmpeg -i "${renamedInput}" ${audioOptions} "${outputPath}" -y`;
+
+  exec(command, { timeout: 120000 }, (error, stdout, stderr) => {
+    try { fs.unlinkSync(renamedInput); } catch (e) {}
+    if (error) return res.status(500).json({ error: 'Conversion failed', details: stderr });
+    if (!fs.existsSync(outputPath)) return res.status(500).json({ error: 'Output file not found' });
+
+    const mimeTypes = { mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', flac: 'audio/flac', aac: 'audio/aac' };
+    const outputFileName = path.basename(originalName, inputExt) + '.' + outputFormat;
+
+    res.setHeader('Content-Type', mimeTypes[outputFormat] || 'audio/mpeg');
     res.setHeader('Content-Disposition', `attachment; filename="${outputFileName}"`);
 
     const fileStream = fs.createReadStream(outputPath);
