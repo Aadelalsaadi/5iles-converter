@@ -18,36 +18,25 @@ app.get('/', (req, res) => {
 // ── Office → PDF ──────────────────────────────────────────────────────────────
 app.post('/convert', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-
   const inputPath = req.file.path;
   const outputDir = '/tmp/outputs/';
   const originalName = req.file.originalname;
   const ext = path.extname(originalName).toLowerCase();
-
   const allowed = ['.pptx', '.ppt', '.xlsx', '.xls', '.docx', '.doc'];
-  if (!allowed.includes(ext)) {
-    fs.unlinkSync(inputPath);
-    return res.status(400).json({ error: 'Unsupported file type.' });
-  }
-
+  if (!allowed.includes(ext)) { fs.unlinkSync(inputPath); return res.status(400).json({ error: 'Unsupported file type.' }); }
   const renamedPath = inputPath + ext;
   fs.renameSync(inputPath, renamedPath);
   if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
-
   const command = `libreoffice --headless --convert-to pdf --outdir ${outputDir} "${renamedPath}"`;
-
   exec(command, { timeout: 60000 }, (error, stdout, stderr) => {
     try { fs.unlinkSync(renamedPath); } catch (e) {}
     if (error) return res.status(500).json({ error: 'Conversion failed', details: stderr });
-
     const baseName = path.basename(renamedPath, ext);
     const outputPath = path.join(outputDir, baseName + '.pdf');
     if (!fs.existsSync(outputPath)) return res.status(500).json({ error: 'Output PDF not found' });
-
     const outputFileName = path.basename(originalName, ext) + '.pdf';
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${outputFileName}"`);
-
     const fileStream = fs.createReadStream(outputPath);
     fileStream.pipe(res);
     fileStream.on('close', () => { try { fs.unlinkSync(outputPath); } catch (e) {} });
@@ -57,32 +46,22 @@ app.post('/convert', upload.single('file'), async (req, res) => {
 // ── Video → MP3 ───────────────────────────────────────────────────────────────
 app.post('/video-to-mp3', upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-
   const inputPath = req.file.path;
   const originalName = req.file.originalname;
   const ext = path.extname(originalName).toLowerCase();
-
   const allowed = ['.mp4', '.mov', '.avi', '.mkv', '.webm', '.wmv', '.flv', '.m4v'];
-  if (!allowed.includes(ext)) {
-    fs.unlinkSync(inputPath);
-    return res.status(400).json({ error: 'Unsupported video format.' });
-  }
-
+  if (!allowed.includes(ext)) { fs.unlinkSync(inputPath); return res.status(400).json({ error: 'Unsupported video format.' }); }
   const renamedInput = inputPath + ext;
   fs.renameSync(inputPath, renamedInput);
-
   const outputPath = renamedInput + '.mp3';
   const command = `ffmpeg -i "${renamedInput}" -vn -acodec libmp3lame -q:a 2 "${outputPath}" -y`;
-
   exec(command, { timeout: 120000 }, (error, stdout, stderr) => {
     try { fs.unlinkSync(renamedInput); } catch (e) {}
     if (error) return res.status(500).json({ error: 'Conversion failed', details: stderr });
     if (!fs.existsSync(outputPath)) return res.status(500).json({ error: 'Output MP3 not found' });
-
     const outputFileName = path.basename(originalName, ext) + '.mp3';
     res.setHeader('Content-Type', 'audio/mpeg');
     res.setHeader('Content-Disposition', `attachment; filename="${outputFileName}"`);
-
     const fileStream = fs.createReadStream(outputPath);
     fileStream.pipe(res);
     fileStream.on('close', () => { try { fs.unlinkSync(outputPath); } catch (e) {} });
@@ -92,50 +71,66 @@ app.post('/video-to-mp3', upload.single('file'), (req, res) => {
 // ── Audio Converter ───────────────────────────────────────────────────────────
 app.post('/convert-audio', upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-
   const inputPath = req.file.path;
   const originalName = req.file.originalname;
   const inputExt = path.extname(originalName).toLowerCase();
   const outputFormat = (req.query.format || 'mp3').toLowerCase();
-
   const allowedInput = ['.mp3', '.wav', '.ogg', '.flac', '.aac', '.m4a', '.wma', '.opus'];
   const allowedOutput = ['mp3', 'wav', 'ogg', 'flac', 'aac'];
-
-  if (!allowedInput.includes(inputExt)) {
-    fs.unlinkSync(inputPath);
-    return res.status(400).json({ error: 'Unsupported audio format.' });
-  }
-  if (!allowedOutput.includes(outputFormat)) {
-    fs.unlinkSync(inputPath);
-    return res.status(400).json({ error: 'Unsupported output format.' });
-  }
-
+  if (!allowedInput.includes(inputExt)) { fs.unlinkSync(inputPath); return res.status(400).json({ error: 'Unsupported audio format.' }); }
+  if (!allowedOutput.includes(outputFormat)) { fs.unlinkSync(inputPath); return res.status(400).json({ error: 'Unsupported output format.' }); }
   const renamedInput = inputPath + inputExt;
   fs.renameSync(inputPath, renamedInput);
-
   const outputPath = renamedInput + '.' + outputFormat;
-
-  // Build FFmpeg command based on output format
   let audioOptions = '';
   if (outputFormat === 'mp3') audioOptions = '-acodec libmp3lame -q:a 2';
   else if (outputFormat === 'wav') audioOptions = '-acodec pcm_s16le';
   else if (outputFormat === 'ogg') audioOptions = '-acodec libvorbis -q:a 4';
   else if (outputFormat === 'flac') audioOptions = '-acodec flac';
   else if (outputFormat === 'aac') audioOptions = '-acodec aac -b:a 192k';
-
   const command = `ffmpeg -i "${renamedInput}" ${audioOptions} "${outputPath}" -y`;
-
   exec(command, { timeout: 120000 }, (error, stdout, stderr) => {
     try { fs.unlinkSync(renamedInput); } catch (e) {}
     if (error) return res.status(500).json({ error: 'Conversion failed', details: stderr });
     if (!fs.existsSync(outputPath)) return res.status(500).json({ error: 'Output file not found' });
-
     const mimeTypes = { mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', flac: 'audio/flac', aac: 'audio/aac' };
     const outputFileName = path.basename(originalName, inputExt) + '.' + outputFormat;
-
     res.setHeader('Content-Type', mimeTypes[outputFormat] || 'audio/mpeg');
     res.setHeader('Content-Disposition', `attachment; filename="${outputFileName}"`);
+    const fileStream = fs.createReadStream(outputPath);
+    fileStream.pipe(res);
+    fileStream.on('close', () => { try { fs.unlinkSync(outputPath); } catch (e) {} });
+  });
+});
 
+// ── Extract Audio from Video ──────────────────────────────────────────────────
+app.post('/extract-audio', upload.single('file'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  const inputPath = req.file.path;
+  const originalName = req.file.originalname;
+  const inputExt = path.extname(originalName).toLowerCase();
+  const outputFormat = (req.query.format || 'mp3').toLowerCase();
+  const allowedInput = ['.mp4', '.mov', '.avi', '.mkv', '.webm', '.wmv', '.flv', '.m4v', '.mpeg', '.mpg'];
+  const allowedOutput = ['mp3', 'wav', 'ogg', 'aac'];
+  if (!allowedInput.includes(inputExt)) { fs.unlinkSync(inputPath); return res.status(400).json({ error: 'Unsupported video format.' }); }
+  if (!allowedOutput.includes(outputFormat)) { fs.unlinkSync(inputPath); return res.status(400).json({ error: 'Unsupported output format.' }); }
+  const renamedInput = inputPath + inputExt;
+  fs.renameSync(inputPath, renamedInput);
+  const outputPath = renamedInput + '.' + outputFormat;
+  let audioOptions = '';
+  if (outputFormat === 'mp3') audioOptions = '-vn -acodec libmp3lame -q:a 2';
+  else if (outputFormat === 'wav') audioOptions = '-vn -acodec pcm_s16le';
+  else if (outputFormat === 'ogg') audioOptions = '-vn -acodec libvorbis -q:a 4';
+  else if (outputFormat === 'aac') audioOptions = '-vn -acodec aac -b:a 192k';
+  const command = `ffmpeg -i "${renamedInput}" ${audioOptions} "${outputPath}" -y`;
+  exec(command, { timeout: 120000 }, (error, stdout, stderr) => {
+    try { fs.unlinkSync(renamedInput); } catch (e) {}
+    if (error) return res.status(500).json({ error: 'Extraction failed', details: stderr });
+    if (!fs.existsSync(outputPath)) return res.status(500).json({ error: 'Output file not found' });
+    const mimeTypes = { mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', aac: 'audio/aac' };
+    const outputFileName = path.basename(originalName, inputExt) + '.' + outputFormat;
+    res.setHeader('Content-Type', mimeTypes[outputFormat] || 'audio/mpeg');
+    res.setHeader('Content-Disposition', `attachment; filename="${outputFileName}"`);
     const fileStream = fs.createReadStream(outputPath);
     fileStream.pipe(res);
     fileStream.on('close', () => { try { fs.unlinkSync(outputPath); } catch (e) {} });
@@ -143,6 +138,4 @@ app.post('/convert-audio', upload.single('file'), (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`5iles converter running on port ${PORT}`);
-});
+app.listen(PORT, () => { console.log(`5iles converter running on port ${PORT}`); });
