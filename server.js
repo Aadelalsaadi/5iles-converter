@@ -6,7 +6,7 @@ const path = require('path');
 const cors = require('cors');
 
 const app = express();
-const upload = multer({ dest: '/tmp/uploads/', limits: { fileSize: 250 * 1024 * 1024 } });
+const upload = multer({ dest: '/tmp/uploads/', limits: { fileSize: 500 * 1024 * 1024 } });
 
 app.use(cors());
 app.use(express.json());
@@ -131,6 +131,43 @@ app.post('/extract-audio', upload.single('file'), (req, res) => {
     const outputFileName = path.basename(originalName, inputExt) + '.' + outputFormat;
     res.setHeader('Content-Type', mimeTypes[outputFormat] || 'audio/mpeg');
     res.setHeader('Content-Disposition', `attachment; filename="${outputFileName}"`);
+    const fileStream = fs.createReadStream(outputPath);
+    fileStream.pipe(res);
+    fileStream.on('close', () => { try { fs.unlinkSync(outputPath); } catch (e) {} });
+  });
+});
+
+// ── Compress Video ────────────────────────────────────────────────────────────
+app.post('/compress-video', upload.single('file'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  const inputPath = req.file.path;
+  const originalName = req.file.originalname;
+  const ext = path.extname(originalName).toLowerCase();
+  const quality = (req.query.quality || 'medium').toLowerCase();
+  const allowed = ['.mp4', '.mov', '.avi', '.mkv', '.webm', '.wmv', '.m4v'];
+  if (!allowed.includes(ext)) { fs.unlinkSync(inputPath); return res.status(400).json({ error: 'Unsupported video format.' }); }
+  const renamedInput = inputPath + ext;
+  fs.renameSync(inputPath, renamedInput);
+  const outputPath = renamedInput + '_compressed.mp4';
+
+  // CRF: lower = better quality, larger file. 18=high, 28=medium, 35=low
+  const crfMap = { high: '23', medium: '28', low: '35' };
+  const crf = crfMap[quality] || '28';
+
+  // Scale down resolution for low quality
+  const scaleFilter = quality === 'low' ? '-vf scale=iw/2:ih/2' : '';
+
+  const command = `ffmpeg -i "${renamedInput}" -vcodec libx264 -crf ${crf} ${scaleFilter} -acodec aac -b:a 128k -movflags +faststart "${outputPath}" -y`;
+
+  exec(command, { timeout: 300000 }, (error, stdout, stderr) => {
+    try { fs.unlinkSync(renamedInput); } catch (e) {}
+    if (error) return res.status(500).json({ error: 'Compression failed', details: stderr });
+    if (!fs.existsSync(outputPath)) return res.status(500).json({ error: 'Output file not found' });
+
+    const outputFileName = path.basename(originalName, ext) + '_compressed.mp4';
+    res.setHeader('Content-Type', 'video/mp4');
+    res.setHeader('Content-Disposition', `attachment; filename="${outputFileName}"`);
+
     const fileStream = fs.createReadStream(outputPath);
     fileStream.pipe(res);
     fileStream.on('close', () => { try { fs.unlinkSync(outputPath); } catch (e) {} });
