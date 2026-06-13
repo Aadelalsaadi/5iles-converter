@@ -6,7 +6,7 @@ const path = require('path');
 const cors = require('cors');
 
 const app = express();
-const upload = multer({ dest: '/tmp/uploads/' });
+const upload = multer({ dest: '/tmp/uploads/', limits: { fileSize: 250 * 1024 * 1024 } });
 
 app.use(cors());
 app.use(express.json());
