@@ -174,5 +174,110 @@ app.post('/compress-video', upload.single('file'), (req, res) => {
   });
 });
 
+// ── PDF → Word ────────────────────────────────────────────────────────────────
+app.post('/pdf-to-word', upload.single('file'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  const inputPath = req.file.path;
+  const originalName = req.file.originalname;
+  const ext = path.extname(originalName).toLowerCase();
+  const outputDir = '/tmp/outputs/';
+  if (ext !== '.pdf') { fs.unlinkSync(inputPath); return res.status(400).json({ error: 'File must be a PDF.' }); }
+  const renamedPath = inputPath + ext;
+  fs.renameSync(inputPath, renamedPath);
+  if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
+  const command = `libreoffice --headless --convert-to docx --outdir ${outputDir} "${renamedPath}"`;
+  exec(command, { timeout: 60000 }, (error, stdout, stderr) => {
+    try { fs.unlinkSync(renamedPath); } catch (e) {}
+    if (error) return res.status(500).json({ error: 'Conversion failed', details: stderr });
+    const baseName = path.basename(renamedPath, ext);
+    const outputPath = path.join(outputDir, baseName + '.docx');
+    if (!fs.existsSync(outputPath)) return res.status(500).json({ error: 'Output Word file not found' });
+    const outputFileName = path.basename(originalName, ext) + '.docx';
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    res.setHeader('Content-Disposition', `attachment; filename="${outputFileName}"`);
+    const fileStream = fs.createReadStream(outputPath);
+    fileStream.pipe(res);
+    fileStream.on('close', () => { try { fs.unlinkSync(outputPath); } catch (e) {} });
+  });
+});
+
+// ── PDF → Excel ───────────────────────────────────────────────────────────────
+// Note: quality depends on the PDF's structure. LibreOffice does a reasonable
+// job on PDFs with clear tabular layout, but won't match dedicated table-
+// extraction services on complex multi-column or scanned documents.
+app.post('/pdf-to-excel', upload.single('file'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  const inputPath = req.file.path;
+  const originalName = req.file.originalname;
+  const ext = path.extname(originalName).toLowerCase();
+  const outputDir = '/tmp/outputs/';
+  if (ext !== '.pdf') { fs.unlinkSync(inputPath); return res.status(400).json({ error: 'File must be a PDF.' }); }
+  const renamedPath = inputPath + ext;
+  fs.renameSync(inputPath, renamedPath);
+  if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
+  const command = `libreoffice --headless --convert-to xlsx --outdir ${outputDir} "${renamedPath}"`;
+  exec(command, { timeout: 60000 }, (error, stdout, stderr) => {
+    try { fs.unlinkSync(renamedPath); } catch (e) {}
+    if (error) return res.status(500).json({ error: 'Conversion failed', details: stderr });
+    const baseName = path.basename(renamedPath, ext);
+    const outputPath = path.join(outputDir, baseName + '.xlsx');
+    if (!fs.existsSync(outputPath)) return res.status(500).json({ error: 'Output Excel file not found' });
+    const outputFileName = path.basename(originalName, ext) + '.xlsx';
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${outputFileName}"`);
+    const fileStream = fs.createReadStream(outputPath);
+    fileStream.pipe(res);
+    fileStream.on('close', () => { try { fs.unlinkSync(outputPath); } catch (e) {} });
+  });
+});
+
+// ── PDF → JPG ─────────────────────────────────────────────────────────────────
+// Renders each page as a JPG. Single-page PDFs return the JPG directly;
+// multi-page PDFs return a ZIP containing one JPG per page.
+app.post('/pdf-to-jpg', upload.single('file'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  const inputPath = req.file.path;
+  const originalName = req.file.originalname;
+  const ext = path.extname(originalName).toLowerCase();
+  if (ext !== '.pdf') { fs.unlinkSync(inputPath); return res.status(400).json({ error: 'File must be a PDF.' }); }
+  const renamedPath = inputPath + ext;
+  fs.renameSync(inputPath, renamedPath);
+  const baseName = path.basename(renamedPath, ext);
+  const outPrefix = `/tmp/outputs/${baseName}_page`;
+  if (!fs.existsSync('/tmp/outputs/')) fs.mkdirSync('/tmp/outputs/', { recursive: true });
+
+  const command = `pdftoppm -jpeg -r 150 "${renamedPath}" "${outPrefix}"`;
+  exec(command, { timeout: 60000 }, (error, stdout, stderr) => {
+    try { fs.unlinkSync(renamedPath); } catch (e) {}
+    if (error) return res.status(500).json({ error: 'Conversion failed', details: stderr });
+
+    const dirFiles = fs.readdirSync('/tmp/outputs/').filter(f => f.startsWith(baseName + '_page'));
+    if (dirFiles.length === 0) return res.status(500).json({ error: 'No output pages found' });
+
+    const cleanup = () => dirFiles.forEach(f => { try { fs.unlinkSync('/tmp/outputs/' + f); } catch (e) {} });
+
+    if (dirFiles.length === 1) {
+      const outputFileName = path.basename(originalName, ext) + '.jpg';
+      res.setHeader('Content-Type', 'image/jpeg');
+      res.setHeader('Content-Disposition', `attachment; filename="${outputFileName}"`);
+      const fileStream = fs.createReadStream('/tmp/outputs/' + dirFiles[0]);
+      fileStream.pipe(res);
+      fileStream.on('close', cleanup);
+    } else {
+      const zipName = path.basename(originalName, ext) + '_pages.zip';
+      const zipPath = `/tmp/outputs/${baseName}_pages.zip`;
+      const zipCommand = `cd /tmp/outputs/ && zip -j "${zipPath}" ${dirFiles.map(f => `"${f}"`).join(' ')}`;
+      exec(zipCommand, { timeout: 30000 }, (zipError) => {
+        if (zipError) { cleanup(); return res.status(500).json({ error: 'Zipping failed' }); }
+        res.setHeader('Content-Type', 'application/zip');
+        res.setHeader('Content-Disposition', `attachment; filename="${zipName}"`);
+        const fileStream = fs.createReadStream(zipPath);
+        fileStream.pipe(res);
+        fileStream.on('close', () => { cleanup(); try { fs.unlinkSync(zipPath); } catch (e) {} });
+      });
+    }
+  });
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => { console.log(`5iles converter running on port ${PORT}`); });
