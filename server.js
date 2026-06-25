@@ -185,7 +185,7 @@ app.post('/pdf-to-word', upload.single('file'), (req, res) => {
   const renamedPath = inputPath + ext;
   fs.renameSync(inputPath, renamedPath);
   if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
-  const command = `libreoffice --headless -env:UserInstallation=file:///tmp/lo_profile_${Date.now()}_${Math.random().toString(36).slice(2)} --convert-to docx --outdir ${outputDir} "${renamedPath}"`;
+  const command = `libreoffice --headless -env:UserInstallation=file:///tmp/lo_profile_${Date.now()}_${Math.random().toString(36).slice(2)} --infilter="writer_pdf_import" --convert-to docx --outdir ${outputDir} "${renamedPath}"`;
   exec(command, { timeout: 180000 }, (error, stdout, stderr) => {
     console.log(`[pdf-to-word] file=${originalName} stdout=${stdout} stderr=${stderr} error=${error}`);
     try { fs.unlinkSync(renamedPath); } catch (e) {}
