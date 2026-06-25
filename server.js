@@ -28,7 +28,7 @@ app.post('/convert', upload.single('file'), async (req, res) => {
   fs.renameSync(inputPath, renamedPath);
   if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
   const command = `libreoffice --headless --convert-to pdf --outdir ${outputDir} "${renamedPath}"`;
-  exec(command, { timeout: 60000 }, (error, stdout, stderr) => {
+  exec(command, { timeout: 180000 }, (error, stdout, stderr) => {
     try { fs.unlinkSync(renamedPath); } catch (e) {}
     if (error) return res.status(500).json({ error: 'Conversion failed', details: stderr });
     const baseName = path.basename(renamedPath, ext);
@@ -186,7 +186,7 @@ app.post('/pdf-to-word', upload.single('file'), (req, res) => {
   fs.renameSync(inputPath, renamedPath);
   if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
   const command = `libreoffice --headless --convert-to docx --outdir ${outputDir} "${renamedPath}"`;
-  exec(command, { timeout: 60000 }, (error, stdout, stderr) => {
+  exec(command, { timeout: 180000 }, (error, stdout, stderr) => {
     try { fs.unlinkSync(renamedPath); } catch (e) {}
     if (error) return res.status(500).json({ error: 'Conversion failed', details: stderr });
     const baseName = path.basename(renamedPath, ext);
@@ -216,7 +216,7 @@ app.post('/pdf-to-excel', upload.single('file'), (req, res) => {
   fs.renameSync(inputPath, renamedPath);
   if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
   const command = `libreoffice --headless --convert-to xlsx --outdir ${outputDir} "${renamedPath}"`;
-  exec(command, { timeout: 60000 }, (error, stdout, stderr) => {
+  exec(command, { timeout: 180000 }, (error, stdout, stderr) => {
     try { fs.unlinkSync(renamedPath); } catch (e) {}
     if (error) return res.status(500).json({ error: 'Conversion failed', details: stderr });
     const baseName = path.basename(renamedPath, ext);
@@ -247,7 +247,7 @@ app.post('/pdf-to-jpg', upload.single('file'), (req, res) => {
   if (!fs.existsSync('/tmp/outputs/')) fs.mkdirSync('/tmp/outputs/', { recursive: true });
 
   const command = `pdftoppm -jpeg -r 150 "${renamedPath}" "${outPrefix}"`;
-  exec(command, { timeout: 60000 }, (error, stdout, stderr) => {
+  exec(command, { timeout: 180000 }, (error, stdout, stderr) => {
     try { fs.unlinkSync(renamedPath); } catch (e) {}
     if (error) return res.status(500).json({ error: 'Conversion failed', details: stderr });
 
