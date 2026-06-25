@@ -187,17 +187,28 @@ app.post('/pdf-to-word', upload.single('file'), (req, res) => {
   if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
   const command = `libreoffice --headless -env:UserInstallation=file:///tmp/lo_profile_${Date.now()}_${Math.random().toString(36).slice(2)} --convert-to docx --outdir ${outputDir} "${renamedPath}"`;
   exec(command, { timeout: 180000 }, (error, stdout, stderr) => {
+    console.log(`[pdf-to-word] file=${originalName} stdout=${stdout} stderr=${stderr} error=${error}`);
     try { fs.unlinkSync(renamedPath); } catch (e) {}
     if (error) return res.status(500).json({ error: 'Conversion failed', details: stderr });
     const baseName = path.basename(renamedPath, ext);
     const outputPath = path.join(outputDir, baseName + '.docx');
-    if (!fs.existsSync(outputPath)) return res.status(500).json({ error: 'Output Word file not found' });
-    const outputFileName = path.basename(originalName, ext) + '.docx';
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
-    res.setHeader('Content-Disposition', `attachment; filename="${outputFileName}"`);
-    const fileStream = fs.createReadStream(outputPath);
-    fileStream.pipe(res);
-    fileStream.on('close', () => { try { fs.unlinkSync(outputPath); } catch (e) {} });
+    const checkAndServe = (attemptsLeft) => {
+      if (fs.existsSync(outputPath)) {
+        const outputFileName = path.basename(originalName, ext) + '.docx';
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+        res.setHeader('Content-Disposition', `attachment; filename="${outputFileName}"`);
+        const fileStream = fs.createReadStream(outputPath);
+        fileStream.pipe(res);
+        fileStream.on('close', () => { try { fs.unlinkSync(outputPath); } catch (e) {} });
+      } else if (attemptsLeft > 0) {
+        setTimeout(() => checkAndServe(attemptsLeft - 1), 1000);
+      } else {
+        console.log(`[pdf-to-word] output never appeared at ${outputPath}`);
+        res.status(500).json({ error: 'Output Word file not found', details: stderr || 'No error output; LibreOffice may have exited without producing a file (possible memory limit on large/complex PDFs).' });
+      }
+    };
+    checkAndServe(5); // retry for up to 5 seconds in case of filesystem write delay
+
   });
 });
 
@@ -217,17 +228,27 @@ app.post('/pdf-to-excel', upload.single('file'), (req, res) => {
   if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
   const command = `libreoffice --headless -env:UserInstallation=file:///tmp/lo_profile_${Date.now()}_${Math.random().toString(36).slice(2)} --convert-to xlsx --outdir ${outputDir} "${renamedPath}"`;
   exec(command, { timeout: 180000 }, (error, stdout, stderr) => {
+    console.log(`[pdf-to-excel] file=${originalName} stdout=${stdout} stderr=${stderr} error=${error}`);
     try { fs.unlinkSync(renamedPath); } catch (e) {}
     if (error) return res.status(500).json({ error: 'Conversion failed', details: stderr });
     const baseName = path.basename(renamedPath, ext);
     const outputPath = path.join(outputDir, baseName + '.xlsx');
-    if (!fs.existsSync(outputPath)) return res.status(500).json({ error: 'Output Excel file not found' });
-    const outputFileName = path.basename(originalName, ext) + '.xlsx';
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename="${outputFileName}"`);
-    const fileStream = fs.createReadStream(outputPath);
-    fileStream.pipe(res);
-    fileStream.on('close', () => { try { fs.unlinkSync(outputPath); } catch (e) {} });
+    const checkAndServe = (attemptsLeft) => {
+      if (fs.existsSync(outputPath)) {
+        const outputFileName = path.basename(originalName, ext) + '.xlsx';
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename="${outputFileName}"`);
+        const fileStream = fs.createReadStream(outputPath);
+        fileStream.pipe(res);
+        fileStream.on('close', () => { try { fs.unlinkSync(outputPath); } catch (e) {} });
+      } else if (attemptsLeft > 0) {
+        setTimeout(() => checkAndServe(attemptsLeft - 1), 1000);
+      } else {
+        console.log(`[pdf-to-excel] output never appeared at ${outputPath}`);
+        res.status(500).json({ error: 'Output Excel file not found', details: stderr || 'No error output; LibreOffice may have exited without producing a file (possible memory limit on large/complex PDFs).' });
+      }
+    };
+    checkAndServe(5);
   });
 });
 
