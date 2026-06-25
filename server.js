@@ -27,7 +27,7 @@ app.post('/convert', upload.single('file'), async (req, res) => {
   const renamedPath = inputPath + ext;
   fs.renameSync(inputPath, renamedPath);
   if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
-  const command = `libreoffice --headless --convert-to pdf --outdir ${outputDir} "${renamedPath}"`;
+  const command = `libreoffice --headless -env:UserInstallation=file:///tmp/lo_profile_${Date.now()}_${Math.random().toString(36).slice(2)} --convert-to pdf --outdir ${outputDir} "${renamedPath}"`;
   exec(command, { timeout: 180000 }, (error, stdout, stderr) => {
     try { fs.unlinkSync(renamedPath); } catch (e) {}
     if (error) return res.status(500).json({ error: 'Conversion failed', details: stderr });
@@ -185,7 +185,7 @@ app.post('/pdf-to-word', upload.single('file'), (req, res) => {
   const renamedPath = inputPath + ext;
   fs.renameSync(inputPath, renamedPath);
   if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
-  const command = `libreoffice --headless --convert-to docx --outdir ${outputDir} "${renamedPath}"`;
+  const command = `libreoffice --headless -env:UserInstallation=file:///tmp/lo_profile_${Date.now()}_${Math.random().toString(36).slice(2)} --convert-to docx --outdir ${outputDir} "${renamedPath}"`;
   exec(command, { timeout: 180000 }, (error, stdout, stderr) => {
     try { fs.unlinkSync(renamedPath); } catch (e) {}
     if (error) return res.status(500).json({ error: 'Conversion failed', details: stderr });
@@ -215,7 +215,7 @@ app.post('/pdf-to-excel', upload.single('file'), (req, res) => {
   const renamedPath = inputPath + ext;
   fs.renameSync(inputPath, renamedPath);
   if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
-  const command = `libreoffice --headless --convert-to xlsx --outdir ${outputDir} "${renamedPath}"`;
+  const command = `libreoffice --headless -env:UserInstallation=file:///tmp/lo_profile_${Date.now()}_${Math.random().toString(36).slice(2)} --convert-to xlsx --outdir ${outputDir} "${renamedPath}"`;
   exec(command, { timeout: 180000 }, (error, stdout, stderr) => {
     try { fs.unlinkSync(renamedPath); } catch (e) {}
     if (error) return res.status(500).json({ error: 'Conversion failed', details: stderr });
