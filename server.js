@@ -294,6 +294,29 @@ app.post('/pdf-to-excel', upload.single('file'), async (req, res) => {
   }
 });
 
+// ── Compress PDF ──────────────────────────────────────────────────────────────
+app.post('/compress-pdf', upload.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  const inputPath = req.file.path;
+  const originalName = req.file.originalname;
+  const ext = path.extname(originalName).toLowerCase();
+  if (ext !== '.pdf') { fs.unlinkSync(inputPath); return res.status(400).json({ error: 'File must be a PDF.' }); }
+  const level = parseInt(req.body.level, 10) || 60;
+  const profile = level <= 40 ? 'web' : level <= 70 ? 'archive' : 'max';
+  const renamedPath = inputPath + ext;
+  fs.renameSync(inputPath, renamedPath);
+  try {
+    const fileInfo = await optimizeWithCloudConvert(renamedPath, originalName, profile);
+    const outputFileName = path.basename(originalName, ext) + '_compressed.pdf';
+    await streamCloudConvertResult(fileInfo, res, 'application/pdf', outputFileName);
+  } catch (err) {
+    console.error('[compress-pdf] error:', err.message);
+    if (!res.headersSent) res.status(500).json({ error: 'Compression failed', details: err.message });
+  } finally {
+    try { fs.unlinkSync(renamedPath); } catch (e) {}
+  }
+});
+
 // ── PDF → JPG ─────────────────────────────────────────────────────────────────
 // Renders each page as a JPG. Single-page PDFs return the JPG directly;
 // multi-page PDFs return a ZIP containing one JPG per page.
