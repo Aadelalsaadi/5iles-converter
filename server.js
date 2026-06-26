@@ -58,7 +58,39 @@ async function streamCloudConvertResult(fileInfo, res, contentType, downloadFile
   res.setHeader('Content-Disposition', `attachment; filename="${downloadFileName}"`);
   Readable.fromWeb(ccResponse.body).pipe(res);
 }
+// Optimizes/compresses a PDF using CloudConvert's "optimize" operation.
+// CloudConvert doesn't take a 0-100 quality number — it uses named profiles.
+// We map our UI's slider (10-90) into 3 of them: web (light), archive (balanced),
+// max (strongest). This is an approximation, not a continuous scale.
+async function optimizeWithCloudConvert(localFilePath, originalFileName, profile) {
+  if (!process.env.CLOUDCONVERT_API_KEY) {
+    throw new Error('Conversion service is not configured (missing API key).');
+  }
+  let job = await cloudConvert.jobs.create({
+    tasks: {
+      'upload-file': { operation: 'import/upload' },
+      'optimize-file': { operation: 'optimize', input: 'upload-file', input_format: 'pdf', profile: profile },
+      'export-file': { operation: 'export/url', input: 'optimize-file' }
+    }
+  });
 
+  const uploadTask = job.tasks.find(t => t.name === 'upload-file');
+  const inputStream = fs.createReadStream(localFilePath);
+  await cloudConvert.tasks.upload(uploadTask, inputStream, originalFileName);
+
+  job = await cloudConvert.jobs.wait(job.id);
+
+  if (job.status === 'error') {
+    const failedTask = job.tasks.find(t => t.status === 'error');
+    throw new Error(failedTask?.message || 'Compression failed.');
+  }
+
+  const exportedFiles = cloudConvert.jobs.getExportUrls(job);
+  if (!exportedFiles || exportedFiles.length === 0) {
+    throw new Error('No output file was produced.');
+  }
+  return exportedFiles[0];
+}
 
 app.use(cors());
 app.use(express.json());
