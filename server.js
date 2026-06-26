@@ -365,7 +365,44 @@ app.post('/pdf-to-jpg', upload.single('file'), (req, res) => {
   });
 });
 
+// ── Unlock PDF (remove password protection) ────────────────────────────────────
+// Uses qpdf with the actual user-supplied password to decrypt the file.
+// IMPORTANT: password is passed via execFile's args array, not interpolated into
+// a shell string, so it can never be interpreted as shell syntax (e.g. ; rm -rf /).
+app.post('/unlock-pdf', upload.single('file'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  const inputPath = req.file.path;
+  const originalName = req.file.originalname;
+  const ext = path.extname(originalName).toLowerCase();
+  if (ext !== '.pdf') { fs.unlinkSync(inputPath); return res.status(400).json({ error: 'File must be a PDF.' }); }
+  const password = req.body.password || '';
+  const renamedPath = inputPath + ext;
+  fs.renameSync(inputPath, renamedPath);
+  const outputPath = renamedPath.replace(ext, '_unlocked' + ext);
+
+  const args = ['--decrypt'];
+  if (password) args.push(`--password=${password}`);
+  args.push(renamedPath, outputPath);
+
+  execFile('qpdf', args, { timeout: 60000 }, (error, stdout, stderr) => {
+    try { fs.unlinkSync(renamedPath); } catch (e) {}
+    const exitCode = error?.code;
+    if (error && exitCode !== 3) {
+      console.error('[unlock-pdf] error:', stderr || error.message);
+      if ((stderr || '').toLowerCase().includes('invalid password')) {
+        return res.status(400).json({ error: 'Incorrect password. Please check it and try again.' });
+      }
+      if (!res.headersSent) res.status(500).json({ error: 'Unable to unlock this PDF.', details: stderr || error.message });
+      return;
+    }
+    res.download(outputPath, originalName.replace(/\.pdf$/i, '_unlocked.pdf'), () => {
+      try { fs.unlinkSync(outputPath); } catch (e) {}
+    });
+  });
+});
+
 const PORT = process.env.PORT || 3000;
+
 
 // Catch multer errors (e.g. file too large) and respond cleanly instead of crashing
 app.use((err, req, res, next) => {
