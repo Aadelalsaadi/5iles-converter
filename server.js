@@ -491,7 +491,98 @@ app.post('/unlock-pdf', upload.single('file'), (req, res) => {
     } catch (err) {
       try { fs.unlinkSync(inputPath); } catch (e) {}
       console.error('[fix-grammar] error:', err);
-      if (!res.headersSent) res.status(500).json({ error: 'Unable to process this document.', details: err.message });
+     if (!res.headersSent) res.status(500).json({ error: 'Unable to process this document.', details: err.message });
+    }
+  });
+
+  // ── Translate Document (Word .docx) ────────────────────────────────────
+  async function translateParagraphsWithClaude(paragraphs, targetLanguage) {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': process.env.ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 8000,
+        messages: [{
+          role: 'user',
+          content: `Translate each of these ${paragraphs.length} paragraphs into ${targetLanguage}. Preserve meaning and tone as closely as possible. Return ONLY a JSON array of ${paragraphs.length} translated strings in the same order — no preamble, no markdown fences, no explanation.\n\n${JSON.stringify(paragraphs)}`
+        }]
+      })
+    });
+    if (!response.ok) throw new Error('Claude API request failed: ' + response.status);
+    const data = await response.json();
+    const raw = data.content[0].text.replace(/```json|```/g, '').trim();
+    return JSON.parse(raw);
+  }
+
+  app.post('/translate-document', upload.single('file'), async (req, res) => {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    const inputPath = req.file.path;
+    const originalName = req.file.originalname;
+    const targetLanguage = req.body.targetLanguage || 'Spanish';
+    if (path.extname(originalName).toLowerCase() !== '.docx') {
+      fs.unlinkSync(inputPath);
+      return res.status(400).json({ error: 'File must be a .docx Word document.' });
+    }
+    try {
+      const buffer = fs.readFileSync(inputPath);
+      const zip = await JSZip.loadAsync(buffer);
+      const xmlStr = await zip.file('word/document.xml').async('string');
+      const dom = new DOMParser().parseFromString(xmlStr, 'text/xml');
+      const paragraphs = Array.from(dom.getElementsByTagName('w:p'));
+
+      const paraTexts = [];
+      const paraRefs = [];
+      for (const p of paragraphs) {
+        const tNodes = Array.from(p.getElementsByTagName('w:t'));
+        const text = tNodes.map(t => t.textContent).join('');
+        if (text.trim().length > 0) {
+          paraTexts.push(text);
+          paraRefs.push(p);
+        }
+      }
+
+      if (paraTexts.length === 0) {
+        fs.unlinkSync(inputPath);
+        return res.status(400).json({ error: 'No text found in this document.' });
+      }
+
+      const BATCH = 40;
+      const translated = [];
+      for (let i = 0; i < paraTexts.length; i += BATCH) {
+        const chunk = paraTexts.slice(i, i + BATCH);
+        const result = await translateParagraphsWithClaude(chunk, targetLanguage);
+        translated.push(...result);
+      }
+
+      paraRefs.forEach((p, idx) => {
+        const runs = Array.from(p.getElementsByTagName('w:r'));
+        if (runs.length === 0) return;
+        const firstRun = runs[0];
+        for (let i = runs.length - 1; i >= 1; i--) p.removeChild(runs[i]);
+        const tNode = firstRun.getElementsByTagName('w:t')[0];
+        if (tNode) {
+          tNode.textContent = translated[idx] != null ? translated[idx] : paraTexts[idx];
+          tNode.setAttribute('xml:space', 'preserve');
+        }
+      });
+
+      const newXml = new XMLSerializer().serializeToString(dom);
+      zip.file('word/document.xml', newXml);
+      const outBuffer = await zip.generateAsync({ type: 'nodebuffer' });
+
+      fs.unlinkSync(inputPath);
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+      res.setHeader('Content-Disposition', `attachment; filename="${originalName.replace(/\.docx$/i, '_translated.docx')}"`);
+      res.send(outBuffer);
+    } catch (err) {
+      try { fs.unlinkSync(inputPath); } catch (e) {}
+      console.error('[translate-document] error:', err);
+      if (!res.headersSent) res.status(500).json({ error: 'Unable to translate this document.', details: err.message });
     }
   });
 
