@@ -6,6 +6,8 @@ const path = require('path');
 const cors = require('cors');
 const CloudConvert = require('cloudconvert');
 const { Readable } = require('stream');
+const JSZip = require('jszip');
+const { DOMParser, XMLSerializer } = require('@xmldom/xmldom');
 
 const app = express();
 const uploadDocs = multer({ dest: '/tmp/uploads/', limits: { fileSize: 50 * 1024 * 1024 } });  // 50MB — documents
